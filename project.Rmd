@@ -1,0 +1,708 @@
+---
+title: "Final project"
+author: "Hai Trung Do - a1899443"
+date: "2024-10-21"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pacman::p_load(tidyverse, skimr, dplyr, rsample, recipes, tidymodels, kknn, rpart.plot, vip)
+```
+
+# Executive summary
+
+Policy and Opinion wants to better understand the public opinions of the public in various countries, so they attempt to predict how people will vote in US elections. Consequently, they want to compare models and find the best models and variables in predicting votes in 2016.
+
+Some data selection and removing methods were used to enhance the accuracy of the analysis such as removing missing data and inappropriate columns. Then, automatically searching tools were conducted and models were analysed carefully to find best version for the prediction. After choosing the most effective model, the most influential variable in the is identified.
+
+The numbers in the analysis shows that a statistical model called logistic regression performs most effectively while the most crucial variable is the previous vote in 2012. Therefore, it is highly recommended for the organisation to consider this model and votes in 2012 to predict vote in 2016. However, they should work with other variables to enhance the accuracy, not only rely on the previous votes.
+
+# Methods
+
+In this analysis, the data is from a dataset with 22,733 subjects and 18 variables related to votes and backgrounds of different people. To find the best model, the first step is cleaning the dataset and create a sample to make the analysis more precise. 
+
+The first step of cleaning data is removing missing data which does not have any impact and predictive value on votes in 2016. Subsequently, I identify the variables having potential influence to keep in the final model, which are:
+
+-   `state`: state of residence. The state of residence can significantly influence voting behavior due to local laws, demographics, and political climates.
+
+-   `voted_2012`: the vote in the 2012 election (democrat/republican). Past voting choices is directly related to voting behaviour.
+
+-   `voted_2016`: the vote in the 2016 election (democrat/republican). This is our response variable, what we want to predict so we need to keep to compare with the predictions.
+
+-   `student_loan`: have a student education loan (yes/no). This can affect voters' priorities because they influence individuals' economic circumstances, policy preferences, and overall views on educational finance and government intervention.
+
+-   `faminc`: family income which is divided into 21 different categories. Family income can be a crucial factor in voting behavior because it often shapes a person's economic interests, policy preferences, and overall worldview.
+
+-   `child_u18`: have a child under the age of 18 (yes/no). Having children can influence voting decisions due to different views on social issues, welfare and policies.
+
+-   `followed_event_fb`: follow a political event on facebook (yes/no). Engagement with political events can correlate with overall political awareness and voting likelihood.
+
+-   `education`: highest education attainment (not high school/high school/ undergraduate/postgraduate). Education level is a significant predictor of voting behavior because this affects individual's perspectives profoundly.
+
+-   `employment`: current employment status (employed/unemployed/retired/student/other). People always consider aspects like unemployment rate, so employment status directly influence political views and voting behavior
+
+-   `maritual_status`: survey participant’s marital status (Divorced/DomesticPartnership/ Married/Separated/Single/Widowed). This can be a crucial factor in voting behavior because it often influences individuals' social values, economic priorities, and political preferences.
+
+-   `home_owner_status`: survey participant’s home owner status (own/rent/other). This can influence voting behavior because people with different home owner status may have different economic interests, policy preferences, and social attitudes.
+
+-   `health_insurance`: hold insurance through a government program such as medicare or medicaid(yes/no). This can indicate priorities related to healthcare policies and may influence voting decisions.
+
+In here, some inappropriate variables are removed including:
+
+-   `...1`: count number of observations from 1 to 22,733. This variable is just to count number of observations and does not contain any predictive information about voting behavior.
+
+-   `ballot_ID`: unique ballot identifying number. A unique identifier with no predictive value for voting behavior so it should be removed.
+
+-   `vote_method`: the way someone voted (in person/by mail). The way someone voted is not relevant to predicting their choice. In here, their voting method is just their personal preference.
+
+-   `social_media`: use social media in the past 24 hours (Yes/No). This indicates recent social media usage, which may not be a reliable predictor of voting preferences because using social media does not mean the posts they see are related to the election.
+
+-   `birth_year`: year of birth. I decided to remove this variable because it only contains missing values.
+
+-   `county`: county of residence. This variable can provide some contextual information, but I decided to use `state` variable which has similar meaning. While `state` has only 12 different categories, `county` has nearly 800 different values which is too specific, complex and can lead to overfitting.
+
+Moreover, I also remove observations with irrelevant values of votes in 2012 and 2016, which are the same as missing data (did not vote or no response). Then, I do the same thing to family income and remove level 31, 98 and 99. After that, looking at the description, I notice that levels 14, 15, 16 are eligible to be recorded in level 32. I sum all these categories together and store it in level 32. With the family income, I also merge categories to reduce the level amount to 4 which can be more interpretable. In here, I merge 3 or 4 consecutive levels so that the 4 final levels will have similar numbers of observations. These 4 levels are described below:
+
+- 1: less than $40,000
+
+- 2: from \$40,000 to $69,999
+
+- 3: from \$70,000 to $119,999
+
+- 4: $120,000 or more
+
+After that, I changed all categorical variables to factor to utilize the analysis. One example can be plotting which treats levels of family income differently between categorical and numeric variable. Finally, I take a random sample of 3000 observations with equal number of votes for democrat and republican in 2016, which will be used as the dataset in this analysis.
+
+To find the relationships between variables, I have made some plots and tables which are justified below:
+
+- In figure 1, the column chart demonstrates how 2016 votes vary for those with a student loan and those without.
+
+- In figure 2, the column chart shows the relationship between 2016 vote and education attainment. In this column, I order the columns by the total votes.
+
+- In figure 3, the column chart shows the relationship between 2016 vote and education attainment grouped by student education loan status.
+
+- I also created a tibble which indicates the total number of votes and same vote between 2012 and 2016. In the last column, I calculated the proportion same vote by dividing number of same votes by the total votes. Then, I use these numbers to plot figure 4.
+
+- In figure 4, the column chart illustrates the proportion of 2016 voters cast the same vote as they did in 2012 given different family income categories.
+
+The next section is fitting models. In this section, I build 3 models to predict vote outcome (democrat/republican) for an individual based on appropriate variables in the provided dataset. When fitting data, I choose preprocessed version of train and test data where necessary transformations have been applied to make the data more suitable for the model. The process of fitting, tuning to find the best model is described below.
+
+- Step 1: I split the sample data that I have made above to get the training and testing set.
+
+- Step 2: I create a recipe and preprocess the testing and training data. In here, I create recipe because it help define a series of pre-processing steps in a systematic, reusable, and organized way. In the recipe, I convert all categorical variables with more than two levels to dummy variables, so that the model will interpret each level independently without assuming any numeric relationship. As a result, I can ensure two-level variables are represented in a form that’s easier for many algorithms to interpret and use effectively, improving model performance.
+
+- Step 3: This stage is model specification in which I define the structure and configuration of 3 predictive models. With k-nearest neighbor model, I chose to tune the number of neighbors while in the random forest, I tuned number of features to consider at each split and minimum number of samples per leaf node.
+
+- Step 4: I create 10 bootstrap resamples. I use boostrapping because this is an efficient resampling method for our data.
+
+- Step 5: I do the model fitting, tuning and finalizing 3 models. In here, 2 models including k-nearest neighbor and random forest need to be tuned to find the best model.
+
+- Step 6: k-nearest neighbor and random forest are finalized and the best models are fit with the training set.
+
+After fitting 3 models, I compare them in terms of accuracy, area under the curve (ROC AUC) and brier score. To select the best model, I use cross-validation to get the samples and fit these results into 3 models. Then, I collect matrices and compare the values to evaluate. Moreover, I also use the testing data to plot the ROC curves of 3 models in the same plot. This step gives me more information to choose the best model since I can compare the area under the curve of these curves. When completing choosing the most effective model, I get a bar chart showing the importance of variables.
+
+# Results
+
+In the Exploratory data analysis section, the plots are justified:
+
+- In figure 1, 2016 votes vary differently for those with a student loan and those without. In terms of students with a student loan, the number of votes for democrat is higher than the votes for republican. In contrast, students without a student loan witnessed a reverse trend that is the number of votes for republican greater than the vote for democrat. In addition, with a sample of 3000 voters, about 85% of them are having a student loan. This shows that the amount of students without education loan participating in voting much greater that those with education loan.
+
+- In figure 2, people whose highest education attainment is highschool dominates other categories in the total amount of voters. Moreover, this number decreases significantly when it comes to undergraduate, postgraduate and no highschool. Given postgraduate and undergraduate, the number of votes for democrat in higher than republican; however, the reverse is true for highschool and no highschool. 
+
+- In figure 3, when splitting figure 2 by student education loan, the trend in figure 2 is true for the column chart of student with no education loan. However, for students with education loan, the number of votes for democrat dominates given all education attainments except for no highschool. Therefore, student education loan slightly affects the relationship between votes in 2016 and education attainments. In addition, in these charts, for both democrat and republican, the amount of votes still follows the downward trend, with the peak at highschool and bottom at no_highschool.
+
+- In figure 4, the proportion of same votes in different categories of family income is extremely high overall, with no value below 0.880. This proves that votes 2012 is a significant predictor for votes in 2016. Besides, level 2 of income from \$40,000 to \$69,999 has the highest percentage of same vote, with 92.4%. Other levels are just a little less than this value and the lowest numbers belongs to level 1 (below \$40,000) of 88.3%.
+
+After tuning and fitting 3 models with the processed training data, the final versions of them are explained below.
+
+* Logistic regression model:
+
+  - Model type: The model is a logistic regression with the response variable voted_2016 and the rest of variables are predictors. This model is predicting the probability of one of the two classes (e.g., voting for a Democrat or a Republican).
+
+  - The intercept (-1.816) represents the logit of voting when all predictor variables are at their baseline levels. This means when all other variables are set to their reference categories (like Arizona state, no student loan, faminc1, ...), the logit of voting would be -1.816.
+  
+  - Other coefficients: since all the predictors are categorical variables, there is no slope value in this model. The coefficients is the change in the logit of voting compared to the baseline when the variable’ value is the corresponding category. For example, the value for stateColorado is -0.085, which implies that being in Colorado (versus the reference state Arizona) decreases the logit of voting by approximately 0.085, suggesting that individuals in Colorado are less likely to vote for democrat compared to the Arizona state.
+
+  - The logit is equal to $ln(\pi_i/{1−\pi_i})$ in which $\pi_i$ is the probability of voting for democrat. For instance, if a man has the values of all variables at its reference level (Arizona state, no student loan, faminc1, no child under 18, do not follow political event on facebook, highschool, employed, divorce, having other home owner status, vote for republican in 2012, no health insurance), the logit equaled to the intercept (-1.816). As a result, his probability of voting for democrat is predicted to be 0.139 (13.9%). This number is lower than 50% so this man is predicted to vote for republican in 2016.
+  
+  - Broader context: Logistic regression helps identify which factors are significantly associated with the likelihood of voting for a particular party. In this model, various factors like state, education, income, and marital status play a role in shaping voting behavior. Understanding these relationships can be helpful in political science, campaign strategies, and social research by revealing demographic or socioeconomic factors that influence voting patterns.
+  
+- K-nearest neighbor model:
+
+  - Model type: The model is a K-nearest neighbors (KNN) classification model. In KNN, predictions are made based on the most common class among the k nearest neighbors in the feature space. 
+  
+  - Type of response variable: nominal, meaning it is a categorical variable. In this case, the possible outcomes are categories (democrat or republican) for voting prediction.
+
+  - Minimal misclassification: The model has a misclassification rate of 0.192. This means that about 19.2% of the predictions were incorrect, indicating an accuracy of approximately 80.8%. The lower this misclassification rate is, the better the model is at correctly classifying the data.
+
+  - Best k: In this model, the best value of k was found to be 100 with the best accuracy among 20 values from 1 to 100. This means that when making a prediction for a new data point, the model looks at the 100 closest data points and assigns the most common class among them as the predicted class. 
+  
+  - Broader context: The chosen k = 100 provides a balance between underfitting and overfitting since a smaller value of k could lead to overfitting. The choice of a large k suggests that the model is considering a broad neighborhood when making predictions. In the context of voting behavior, using a larger number of neighbors may indicate that the model is accounting for general patterns across a broader population, rather than focusing on specific, localized differences among individuals. This could be important in contexts where there are shared characteristics or behaviors among large groups.
+  
+- Random forest: 
+
+  - Overview: this model is built for probability estimation, predicting the probability that a person voted in the 2016 election.
+
+  - Number of Trees: The model consists of 100 trees. This is a typical choice that provides a balance between model complexity and computation time and costs. Generally, a larger number of trees can increase the model’s robustness and accuracy, as it reduces the variance in predictions. However, more trees can also increase computational costs and time.
+  
+  - Sample Size: The model was trained on a dataset containing 2,250 observations, with 33 independent variables used as predictors.
+
+  - Model hyperparameters: The parameter mtry = 9 indicates that 9 features were considered for splitting at each node. The parameter min_n = 30 sets a minimum of 30 samples per leaf node, which helps prevent overfitting by ensuring that nodes do not become too specific to individual samples. 
+  
+  - The model uses permutation importance to measure the influence of each feature. This approach involves randomly shuffling the values of each feature and observing the change in prediction accuracy. Besides, the model uses the Gini index to determine how to split the data at each node.
+  
+  - Out-of-bag (OOB) prediction error: 0.083 or about 8.3%, suggesting the model is about 91.7% accurate on unseen data. This shows that the model's probability predictions are reasonably accurate.
+  
+  - Broader context: By using reasonable number of trees, predictors and minimum samples per leaf node, this random forest model seems to tune well for a classification task. The low Brier score suggests that it is likely to produce accurate probabilistic predictions for votes in 2016.
+  
+From those 3 models, after fitting the cross-validation results, collecting matrices gives:
+
+- Accuracy (higher is better): 
+
+  - Logistic regression model: 0.906 (highest)
+  
+  - K-nearest neighbor model: 0.800
+
+  - Random forest: 0.906 (highest)
+  
+- Brier class (lower is better):
+
+  - Logistic regression model: 0.081 (lowest)
+  
+  - K-nearest neighbor model: 0.164
+
+  - Random forest: 0.084
+
+- ROC AUC (higher is better):
+
+  - Logistic regression model: 0.934 (highest)
+  
+  - K-nearest neighbor model: 0.892
+
+  - Random forest: 0.931
+  
+Logistic Regression has the highest accuracy (0.906), lowest Brier score (0.081) and highest ROC AUC (0.934), becoming the most reliable probability predictions and the best overall ability to distinguish between classes.
+
+Random forest has the same accuracy as the logistic regression (0.906) but its lower ROC AUC (0.931) and higher brier score (0.084) show that it is slightly less effective than the best model, with the average difference of 0.003.
+
+K-Nearest Neighbors performs the worst across all metrics, with the lowest accuracy(0.800), highest Brier score(0.164), and lowest ROC AUC(0.892).
+
+On the other hand, fitting the test dataset into the models gives slightly different results of ROC AUC.
+
+- Logistic regression model: 0.931 
+
+- K-nearest neighbor model: 0.892 
+
+- Random forest: 0.933 (highest)
+
+The random forest has the highest ROC AUC (0.933), followed closely by the logistic regression model (0.931). The difference between these two is very small (only 0.002), indicating that both models perform similarly in terms of classification accuracy.
+
+The k-nearest neighbor model has the lowest ROC AUC (0.892), suggesting it is less effective at distinguishing between the classes in this case compared to the other two models.
+
+These numbers reflect exactly 3 curves in the plot. The curves for the logistic regression and random forest are fairly identical. Besides, the curves for k-nearest neighbor shows a little deviation to the right so its are under the curve is significantly lower than other models.
+
+Selecting model: After fitting 2 different datasets into 3 models, the most effective and constant model for predicting votes in 2016 is the logistic regression model. This this because:
+
+- In the first data, logistic regression always show the best indexes following by random forest. In this data, k-nearest neighbor is the worst model with the numbers far behind other models. Although having the same accuracy, random forest is 0.003 less and greater than the logistic regression given ROC AUC and brier class respectively. Therefore, the race to the best model is only for these two models.
+
+- In the second data, although random forest has the highest ROC AUC but it is just 0.002 greater than the logistic regression. This number is less than the average difference between these two models in the first data.
+
+Therefore, logistic regression model is the best model overall. The second ranked to random forest which has the numbers are just slightly less than logistic regression in two data. It is undeniable that k-nearest neighbor is the worst model.
+  
+# Discussion
+
+The chosen model has been showed to be the logistic regression model. In figure 6, regarding the importance score, it is clear that the previous vote in 2012 (specifically voting for republican) is by far the most important predictor of the vote in 2016. This matches what I have found in the proportion of same votes in 2012 and 2016. Besides, education attainment of undergraduate and family income of $120,000 or more are the next most important predictors in this model, suggesting education attainment and family income are relevant factors. The remaining variables with lesser importance include `education_postgraduate`, `faminc_X3` and so on. 
+
+That `voted_2012republican` is the most significant variable does not means that using this predictors completely brings benefits to this model.
+
+  - Benefit: `voted_2012republican` has the highest importance score, indicating that there is a strong relationship between votes in 2012 and votes in 2016. Consequently, past voting behavior can be a powerful predictor of future behavior, as it reflects established preferences and values. 
+
+  - Limitation: great difference between the importance score of this variable and other variables means that relying heavily on past voting behavior can lead to overfitting. This is because it may only capture historical trends that might not apply in future and ignore values of other predictors. Moreover, votes in 2012 could reinforce biases if the year 2016 experienced major changes in political preferences like economic conditions, social movements or demographic changes.
+
+Consequently, apart from votes in 2012, other predictors are advantageous in their own way. However, they also have their own limitations like do not have significant impact on the model which is showed in figure 6.
+
+In a broader context, these variables are useful for capturing different dimensions of social, economic, and demographic characteristics in the data. However, each variable comes with limitations that could impact the model’s generalizability and robustness. By focusing too heavily on specific predictors like votes in the previous year, the model may reinforce biases or overlook complex interactions among variables. It’s also important to consider whether these variables capture stable traits or if they may shift over time, which could limit the model's accuracy in future or in different demographic contexts.
+
+When it comes to the chosen dataset and logistic model in general, there are some benefits and limitations:
+
+- Benefit: Logistic regression provides interpretable coefficients, allowing us to understand the direction and magnitude of the relationship between each predictor and the likelihood of voting for a particular party. Many of the variables, such as `state`, `education`, `employment`, `marital_status`, and `home_owner_status`, are categorical and can be easily incorporated into logistic regression. In addition, these variables could help the model capture patterns across different groups, making the analysis more precise. Besides, logistic regression is computationally less intensive than many other models like k-nearest neighbor or random forest, which need to be tuned. Consequently, this model is beneficial when working with a large dataset.
+
+- Limitation: Variables like vote in 2012 can lead to overfitting and data leakage since its importance score is far beyond others. This mean that the model may simply memorize and overrely on past votes rather than generalizing to other data. Besides, certain variables may be highly correlated like `education` and `employment`, which could lead to unstable coefficients, interpretation challenges and decrease in importance score. In addition, the original data have nearly 23,000 observations but I only analyze a sample of 3,000 observations which is just a relatively small portion of the original dataset. Therefore, the results can vary if I change the number in set.seed and the sample becomes different.
+
+# Conclusions
+
+The organisation Policy and Opinion has been increasingly interested in the recent attempts to predict how people will vote in US elections. They completed a survey and get a large dataset. Now, they want to clean the data, compare models and find the best model to predict the votes in 2016.
+
+After some steps to make the data less complex like randomly choosing a specific number of rows a, removing irrelevant variables and missing data in the original dataset, the final dataset with only 3000 rows and 12 columns are analyzed. This includes votes in 2016 which is the target of the prediction and will be predicted by state, student loan status, family income, child under 18, following event on facebook, education attainment, employment status, maritual status, home owner status, voted in 2012 and health insurance. 
+
+After removing inappropriate data, some column charts and tables were created to understand the relationships between variables. By these figures, we know that student with education loan participated in voting more than those without this loan. Also, high school witnessed the highest number of voters among other type of education attainment. Moreover, the proportion of voters have the same vote in 2012 and 2016 is extremely high. After doing automatically search for the best settings, a statistical model called logistic regression is the most effective. Besides, the previous votes in 2012 shows to be the most important variable to predict votes in 2016.
+
+Based on these findings, it is recommended that the organization uses the logistic regression model to predict voting behavior in 2016. While previous voting history is the most important predictor, all variables should be considered for the best results.
+
+# Statistical Appendix
+
+## 1. Cleaning and preparing
+
+```{r import uncleaned data}
+# read data 
+election <- read_csv("/Users/dotrung67/Documents/Adelaide/Ade sem 2 2024/Data taming and prediction/Project/election.csv")
+# convert to tibble
+election <- as_tibble(election)
+# election
+# skim and summary data to decide removing variable
+# skim_without_charts(election)
+# summary(election)
+# election %>% distinct(ballot_ID)
+```
+
+### Remove inappropriate variables
+
+```{r remove inappropriate variables}
+set.seed(1899443)
+election <- election %>%
+  dplyr::select(-c(...1, 
+                   ballot_ID, 
+                   vote_method,
+                   social_media, 
+                   birth_year,
+                   county))
+```
+
+### Remove missing values
+
+```{r remove missing value}
+# remove missing values in the dataset to make the predictions more reliable.
+election <- election %>% drop_na()
+```
+
+### Remove observations which do not have predictive value
+
+```{r remove observations}
+# remove irrelevant values of voted_2012 and voted_2016 to make the predictions 
+# more precise and less complex
+election <- election %>% 
+  filter(voted_2012 == "democrat" | voted_2012 == "republican")
+election <- election %>% 
+  filter(voted_2016 == "democrat" | voted_2016 == "republican")
+```
+
+### Change family income categories
+
+```{r}
+# remove levels of family income which do not provide response
+election <- election %>% filter(faminc != 31, 
+                                faminc != 98,
+                                faminc != 99)
+# change category 14, 15, 16 to 32 because they overlap with category 32
+election <- election %>% 
+  mutate(faminc = 
+           case_when(
+             faminc == 14 ~ 32, 
+             faminc == 15 ~ 32, 
+             faminc == 16 ~ 32, 
+             TRUE ~ faminc))
+# merge some categories to reduce number of levels in family income
+election <- election %>% 
+  mutate(faminc = 
+           case_when(
+             faminc == 1 ~ 1, 
+             faminc == 2 ~ 1, 
+             faminc == 3 ~ 1, 
+             faminc == 4 ~ 1, 
+             faminc == 5 ~ 2, 
+             faminc == 6 ~ 2, 
+             faminc == 7 ~ 2, 
+             faminc == 8 ~ 3, 
+             faminc == 9 ~ 3, 
+             faminc == 10 ~ 3, 
+             faminc == 11 ~ 4, 
+             faminc == 12 ~ 4, 
+             faminc == 13 ~ 4, 
+             faminc == 32 ~ 4, 
+             TRUE ~ faminc))
+# count number of observations in each level to compare
+# election %>% count(faminc)
+```
+
+### Change variables' types
+
+```{r factorize all variables}
+# factorize all variables to utilize analysing such as plotting
+election <- election %>% mutate_all(as.factor)
+```
+
+### Take a sample of 3000 observations
+
+```{r take a sample of 3000 observations}
+# set seed for reproducibility
+set.seed(1899443)
+# filter the dataset to get 2 datasets for democrat and republican voters
+democrat_voters <- election %>% 
+  filter(voted_2016 == "democrat")
+republican_voters <- election %>% 
+  filter(voted_2016 == "republican")
+# take a random sample of 1500 observations in each dataset
+random_democrat <- sample_n(democrat_voters, 1500)
+random_republican <- sample_n(republican_voters, 1500)
+# combine the two samples 
+sample_election <- rbind(random_democrat, random_republican)
+# shuffle all rows to create the final dataset
+sample_election <- sample_election %>% 
+  slice_sample(prop = 1)
+sample_election
+```
+
+## 2. Exploratory data analysis
+
+### How do 2016 votes vary for those with a student loan and those without?
+
+```{r figure 1, fig.cap="The comparison votes in 2016 regarding student loan status. In the figure, the number votes (y-axis) differs significantly over student loan which is colored differently, with red (have no student loan) and blue (have student loan). Additionally, the x-axis indicates different votes (democrat/republican) in 2016. Interestingly, the number of students without loan voting in 2016 dominates the number for those with loan."}
+ggplot(data = sample_election, aes(x = voted_2016, fill = student_loan)) +
+  geom_bar(position = "dodge") +
+  labs(x = "Voted in 2016", 
+       y = "Number of votes",
+       fill = "Student loan",
+       title = "Vote in 2016 with student loan status") +
+  theme_light() +
+  theme(plot.title = element_text(hjust = 0.5)) # center the title
+```
+
+### What is the relationship between 2016 vote and education attainment, and is this influenced by student loan status?
+
+```{r figure 2, fig.cap="The comparison votes in 2016 regarding different education attainments. In the column chart, the number votes (y-axis) changes considerably over education attainment(x-axis). Additionally, different votes (democrat/republican) in 2016 are colored differently and grouped by education attainment, with red for democrat and blue for republican. Interestingly, the total votes from students studying highschool is the highest number regarding both democrat and republican, while students of no highschool participate in voting in the smallest amount."}
+ggplot(data = sample_election, aes(x = fct_infreq(education), fill = voted_2016)) +
+  geom_bar(position = "dodge") +
+  labs(x = "Education attainment", 
+       y = "Number of votes",
+       fill = "Voted 2016",
+       title = "Vote in 2016 with education attainment") +
+  theme_light() +
+  theme(plot.title = element_text(hjust = 0.5)) # center the title
+```
+
+```{r figure 3, fig.cap="The comparison votes in 2016 regarding different education attainments and student loan status. There are 2 column charts of different student loan status (no/yes) which is showed on the top of each chart. In a column chart, the number votes (y-axis) changes considerably over education attainment(x-axis). Additionally, different votes (democrat/republican) in 2016 are colored differently and grouped by education attainment, with red for democrat and blue for republican. Interestingly, both statuses of student loan experience the same trend, with the highest value for highschool, decreasing gradually for undergraduate, postgraduate and reaching the lowest value at no_highschool."}
+ggplot(data = sample_election, aes(x = fct_infreq(education), 
+                                   fill = voted_2016)) +
+  geom_bar(position = "dodge") +
+  labs(x = "Education attainment", 
+       y = "Number of voters",
+       fill = "Voted 2016",
+       title = "Vote in 2016 with education attainment splitted 
+       by student education loan") +
+  theme_light() +
+  facet_wrap(~student_loan, scales = "free_y") +
+  theme(plot.title = element_text(hjust = 0.5, size = 15), # center the title and change size
+        axis.text.x = element_text(angle = 45, hjust = 1)) # rotate the label in x axis
+```
+
+### For each income category, what proportion of 2016 voters cast the same vote as they did in 2012?
+
+#### Make proportion table
+
+```{r make proportion table}
+# add column to know whether a voter has the same vote as they did in 2012
+sample_edit <- sample_election %>%
+  mutate(same_vote = case_when(voted_2016 == voted_2012 ~ "yes",
+                               TRUE ~ "no"))
+# select necessary columns for calculating proportion
+sample_edit2 <- sample_edit %>%  
+  dplyr::select(c(faminc, voted_2012, voted_2016, same_vote)) 
+# count total number of voters in each category of family income, store in tibble1
+count_table1 <- sample_edit2 %>% group_by(faminc) %>% count() 
+# count total number of same vote in each category of family income, store in tibble2
+count_table2 <- sample_edit2 %>% 
+  group_by(faminc) %>% 
+  count(same_vote) %>% 
+  filter(same_vote == "yes")
+# merge 2 tibbles above to calculate proportion
+count_table <- cbind(count_table1, count_table2) 
+# remove unnecessary columns
+count_table <- count_table %>% dplyr::select(-c(faminc...3, same_vote))
+# rename variables
+count_table <- count_table %>% 
+  rename(
+    faminc = faminc...1,
+    total_vote = n...2,
+    same_vote = n...5
+  )
+# calculate proportion
+count_table <- count_table %>% 
+  mutate( proportion = same_vote/total_vote)
+# round proportion to 3 decimal places
+count_table$proportion <- round(count_table$proportion, 3)
+count_table
+```
+
+#### Plot
+
+```{r figure 4, fig.cap="The proportion of 2016 voters casting the same vote as they did in 2012 regarding different categories of family income. We see in this figure that the different family income categories are listed on the x-axis and the y-axis shows the proportions of same vote which are between 0 and 1. Interestingly, the proportion of same vote for all categories are extremely high (all over 0.880), with the peak at level 2."}
+ggplot(data = count_table, aes(x = faminc, y = proportion, fill = faminc)) +
+  geom_col() +
+  labs(x = "Family income", 
+       y = "Proportion of same vote",
+       title = "Proportion of 2016 voters cast the same vote as they 
+       did in 2012 given family income") +
+  theme_light() +
+  theme(plot.title = element_text(hjust = 0.5),  # center the title
+        legend.position = "none") + # dont show legend
+  geom_text(aes(label = proportion), vjust = -0.5, size = 3.0) # add numbers on columns
+```
+
+## 3. Fit models
+
+### Split data into testing and training set
+
+```{r split data}
+set.seed(1899443)
+election_split <- initial_split(sample_election) # split
+election_train <- training(election_split) # get training set
+election_test <- testing(election_split) # get testing set
+```
+
+### Preprocess both datasets
+
+```{r preprocess both datasets}
+set.seed(1899443)
+# create recipe
+election_recipe <- recipe(voted_2016 ~ ., data = election_train) %>%
+  step_dummy(marital_status, home_owner_status, employment, education, state, faminc) 
+# convert all categorical variable(s) with more than two 
+# levels to dummy/indicator variables
+
+# Prepare the recipe using the training data
+prepared_election_recipe <- election_recipe %>% prep()
+# extract our pre-processed training data
+election_train_preproc <- juice(prepared_election_recipe)
+# apply the pre-processing steps to our testing data
+election_test_preproc <- bake(prepared_election_recipe, new_data = election_test)
+```
+
+### Model specifications
+
+```{r model specifications}
+# set modes of all models to classification to predict categorical variable
+# logistic regression model
+log_reg_model <- logistic_reg(mode = "classification") %>%
+  set_engine("glm")
+# K-nearest neighbours model (tune the number of neighbors)
+near_neighbour_spec <- nearest_neighbor(mode = "classification",
+                                        neighbors = tune()) %>% 
+  set_engine("kknn")
+# Random forest (tune number of features to consider at each split - mtry() and 
+#                 minimum number of samples per leaf node - min_n())
+rf_spec <- rand_forest( mode = "classification",
+                        trees = 100, 
+                        mtry = tune(),
+                        min_n = tune() ) %>% 
+  set_engine( "ranger", importance = "permutation" )
+```
+
+### Create samples by bootstrapping
+
+```{r}
+set.seed(1899443)
+# make 10 bootstrap resamples
+election_boots <- bootstraps( election_train_preproc, times = 10) 
+```
+
+### Model fitting - tuning - finalizing
+
+#### Logistic regression model
+
+```{r logistic regression model}
+# fit the model
+final_log_reg <- log_reg_model %>%
+  fit( voted_2016 ~ . , data = election_train_preproc )
+final_log_reg
+```
+
+#### K-nearest neighbors model
+
+```{r k-nearest neighbours model}
+set.seed(1899443)
+# define the grid of 'k' values
+k_grid <- grid_regular(neighbors(range=c(1, 100)), levels = 20)
+# tune the k-nearest neighbours model
+near_neighbour_tune <- tune_grid(
+  object = near_neighbour_spec,
+  preprocessor = recipe(voted_2016~.,
+                        data = election_train_preproc),
+  resamples = election_boots,
+  grid = k_grid )
+# extract the best k based on accuracy
+best_k <- select_best(near_neighbour_tune, metric="accuracy")
+# take the selected best k and incorporate them into the model specification
+final_spec_knn <- finalize_model(near_neighbour_spec, best_k)
+# fit the model with the best accuracy
+final_knn <- final_spec_knn %>%
+  fit( voted_2016 ~ . , data = election_train_preproc )
+final_knn
+```
+
+#### Random forest
+
+```{r random forest}
+set.seed(1899443)
+# make a regular grid of tuning parameters for mtry and min_n with 5 levels
+rand_spec_grid <- grid_regular( 
+  finalize( mtry(), 
+            election_train_preproc %>% 
+              dplyr::select( -voted_2016 ) ),
+  min_n(),
+  levels = 5 )
+# tune the random forest model on the cross-validation sets
+doParallel::registerDoParallel()
+rf_tuned <- tune_grid( object = rf_spec,
+                       preprocessor = recipe(voted_2016 ~ ., 
+                                             election_train_preproc),
+                       resamples = election_boots,
+                       grid = rand_spec_grid)
+# select the best model based on accuracy
+best_rf <- select_best( rf_tuned, metric="accuracy" )
+# take the selected best mtry(), min_n() and incorporate them into the model specification
+final_spec_rf <- finalize_model( rf_spec, best_rf )
+# fit the model with the best accuracy
+final_rf <- final_spec_rf %>%
+  fit( voted_2016 ~ . , data = election_train_preproc )
+final_rf
+```
+
+## 4. Compare models
+
+### Set up 10 fold cross-validation
+
+```{r}
+set.seed(1899443)
+election_cv <- vfold_cv(election_train_preproc, v = 10)
+```
+
+### Evaluate 3 models based on cross-validation results
+
+```{r}
+set.seed(1899443)
+# Logistic regression model
+log_reg_cv <- fit_resamples( object = log_reg_model,
+                             preprocessor = recipe(voted_2016 ~ . , 
+                                                   data = election_train_preproc), 
+                             resamples = election_cv )
+# collect metrices
+log_reg_cv %>% collect_metrics()
+```
+
+```{r}
+set.seed(1899443)
+# K-nearest neighbours model
+knn_cv <- fit_resamples( object = final_spec_knn, 
+                             preprocessor = recipe(voted_2016 ~ . ,
+                                                   data = election_train_preproc), 
+                             resamples = election_cv )
+# collect metrices
+knn_cv %>% collect_metrics()
+```
+
+```{r}
+set.seed(1899443)
+# Random forest
+rf_cv <- fit_resamples( object = final_spec_rf,
+                             preprocessor = recipe(voted_2016 ~ . , 
+                                                   data = election_train_preproc), 
+                             resamples = election_cv )
+# collect metrices
+rf_cv %>% collect_metrics()
+```
+
+### Create a ROC curve for 3 models on the same plot
+
+#### Predict test dataset on 3 models in terms of probability
+
+```{r}
+set.seed(1899443)
+# logistic regression model
+# get probabilistic predictions using the k-nearest neighbours model
+log_reg_preds <- predict(final_log_reg,
+                     new_data = election_test_preproc,
+                     type="prob")
+# bind the truth data with the predictions
+log_reg_results <- log_reg_preds %>%
+  bind_cols( election_test_preproc %>%
+               dplyr::select(voted_2016) %>%
+               mutate(model = "logistic regression") )
+```
+
+```{r}
+set.seed(1899443)
+# k-nearest neighbours model
+# get probabilistic predictions using the k-nearest neighbours model
+knn_preds <- predict(final_knn,
+                     new_data = election_test_preproc,
+                     type="prob")
+# bind the truth data with the predictions
+knn_results <- knn_preds %>%
+  bind_cols( election_test_preproc %>%
+               dplyr::select(voted_2016) %>%
+               mutate(model = "k-nearest neighbors") )
+```
+
+```{r}
+set.seed(1899443)
+# random forest
+# get probabilistic predictions using random forest
+rf_preds <- predict(final_rf,
+                    new_data = election_test_preproc,
+                    type="prob")
+# bind the truth data with the predictions
+rf_results <- rf_preds %>%
+  bind_cols( election_test_preproc %>%
+               dplyr::select(voted_2016) %>%
+               mutate(model = "random forest") )
+```
+
+#### Plot the ROC curves
+
+```{r}
+set.seed(1899443)
+# Combine the results from 3 models 
+model_preds <- bind_rows(log_reg_results, knn_results, rf_results)
+```
+
+```{r, fig.cap="The receiver operating characteristic curve (ROC) of 3 models including k-nearest neighbors, logistic regression and random forest. This plot is created by the sensitivy (y-axis) and the corresponding specificity (x-axis) of each model, showing the trade-off between the true positive rate (sensitivity) and the false positive rate (1-specificity). The x-axis represents the proportion of negative instances that were incorrectly classified as positive while the y-axis represents the proportion of positive instances that were correctly classified. Interestingly, the curves for logistic regression model and random forest look identical."}
+# plot the ROC curves!
+model_preds %>%
+  group_by(model) %>%
+  roc_curve(.pred_democrat, truth = voted_2016, event_level = "first") %>%
+  autoplot()
+```
+
+### AUC of 3 models in terms of test dataset
+
+```{r}
+set.seed(1899443)
+# get the roc auc value of 3 curves
+model_preds %>%
+  group_by(model) %>%
+  roc_auc(.pred_democrat, truth = voted_2016)
+```
+
+### Most important variable
+
+```{r important variable, fig.cap = "The importance of variables in the final model of logistic regression. We see in this bar chart that the importance (x-axis) is indicated for each variable (y-axis). It is easily noticed that the republican value of votes for 2012 has the biggest impact on the model. Interestingly, this importance value is about 8 times more than the number for variable in the second position."}
+set.seed(1899443)
+# fit the data to the best model
+election_log_reg <- log_reg_model %>% 
+  fit( voted_2016 ~ . , data = election_train_preproc )
+# plot the bar chart showing importance scores of variables
+election_log_reg %>% vip()
+```
+
+
+
+
+
+
+
+
